@@ -1,6 +1,6 @@
 import functools
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings
 from sqlalchemy.engine import URL
 
@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     postgres_db: str
     postgres_user: str
     postgres_password: SecretStr
+
+    jwt_secret_key: SecretStr
+    access_token_expire_minutes: int = Field(default=30, gt=0)
 
     model_config = {"extra": "ignore"}
 
