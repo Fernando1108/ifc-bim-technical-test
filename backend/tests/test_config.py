@@ -6,6 +6,8 @@ from app.core.config import Settings
 
 def _make_settings(**kwargs) -> Settings:
     defaults = {
+        "postgres_host": "db",
+        "postgres_internal_port": 5432,
         "postgres_db": "test_db",
         "postgres_user": "test_user",
         "postgres_password": "prueba@local:123/segura",
