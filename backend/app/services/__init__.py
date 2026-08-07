@@ -26,6 +26,10 @@ from app.services.ifc_queries import (
     get_ifc_model_for_owner,
     list_ifc_models_for_owner,
 )
+from app.services.ifc_spatial import (
+    IfcSpatialExtractionError,
+    extract_and_persist_spatial_structure,
+)
 
 __all__ = [
     "InvalidCredentialsError",
@@ -49,4 +53,6 @@ __all__ = [
     "IfcModelQueryError",
     "get_ifc_model_for_owner",
     "list_ifc_models_for_owner",
+    "IfcSpatialExtractionError",
+    "extract_and_persist_spatial_structure",
 ]
