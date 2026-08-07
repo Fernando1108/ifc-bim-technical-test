@@ -8,8 +8,17 @@ from app.api.dependencies.auth import get_current_user
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.user import User
+from app.schemas.ifc_element import (
+    IfcElementDetailResponse,
+    IfcElementPropertyResponse,
+    IfcSpatialNodeSummary,
+)
 from app.schemas.ifc_model import IfcModelResponse
 from app.services.ifc_background import process_ifc_model_background
+from app.services.ifc_element_queries import (
+    IfcElementQueryError,
+    get_ifc_element_detail,
+)
 from app.services.ifc_models import IfcModelPersistenceError, persist_ifc_model
 from app.services.ifc_queries import (
     IfcModelQueryError,
@@ -265,4 +274,93 @@ def download_ifc_file(
         path=candidate,
         media_type="application/octet-stream",
         filename=model.original_filename,
+    )
+
+
+@router.get(
+    "/{model_id}/elements/{global_id}",
+    response_model=IfcElementDetailResponse,
+    status_code=status.HTTP_200_OK,
+)
+def get_element_detail(
+    model_id: int,
+    global_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> IfcElementDetailResponse:
+    """
+    Retrieve the persisted BIM detail of a single IFC element.
+
+    Identified by model_id + global_id (IFC compressed GlobalId).
+
+    Security guarantees:
+    - Requires valid Bearer JWT.
+    - IDOR-protected: model ownership is verified before the element is queried.
+    - Only COMPLETED models have BIM data available.
+    - Never reopens the IFC file; all data comes exclusively from PostgreSQL.
+    - Read-only: no DB writes, commits, flushes, or rollbacks.
+    - Missing model and wrong-owner model both return 404 (no IDOR leak).
+    """
+    # 1. Authorize model — IDOR guard
+    try:
+        model = get_ifc_model_for_owner(db, model_id, current_user.id)
+    except IfcModelQueryError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error interno al consultar el modelo.",
+        )
+    if model is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Modelo IFC no encontrado.",
+        )
+
+    # 2. Status guard — BIM data only available for COMPLETED models
+    if model.status != "COMPLETED":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="La información BIM del modelo no está disponible.",
+        )
+
+    # 3. Query element detail
+    try:
+        detail = get_ifc_element_detail(db, model_id, global_id)
+    except IfcElementQueryError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error interno al consultar el elemento IFC.",
+        )
+    if detail is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Elemento IFC no encontrado.",
+        )
+
+    # 4. Serialize — copy only permitted fields; no internal ids exposed
+    return IfcElementDetailResponse(
+        ifc_entity_id=detail.element.ifc_entity_id,
+        global_id=detail.element.global_id,
+        ifc_type=detail.element.ifc_type,
+        name=detail.element.name,
+        description=detail.element.description,
+        object_type=detail.element.object_type,
+        tag=detail.element.tag,
+        predefined_type=detail.element.predefined_type,
+        type_global_id=detail.element.type_global_id,
+        type_ifc_type=detail.element.type_ifc_type,
+        type_name=detail.element.type_name,
+        direct_spatial=(
+            IfcSpatialNodeSummary.model_validate(detail.direct_spatial)
+            if detail.direct_spatial is not None
+            else None
+        ),
+        resolved_storey=(
+            IfcSpatialNodeSummary.model_validate(detail.resolved_storey)
+            if detail.resolved_storey is not None
+            else None
+        ),
+        properties=[
+            IfcElementPropertyResponse.model_validate(p)
+            for p in detail.properties
+        ],
     )
