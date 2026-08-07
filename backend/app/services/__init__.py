@@ -14,6 +14,12 @@ from app.services.ifc_storage import (
     save_ifc_file,
 )
 from app.services.ifc_models import IfcModelPersistenceError, persist_ifc_model
+from app.services.ifc_processing import (
+    IfcInvalidProcessingStateError,
+    IfcProcessingError,
+    IfcProcessingPersistenceError,
+    process_ifc_model,
+)
 
 __all__ = [
     "InvalidCredentialsError",
@@ -29,4 +35,8 @@ __all__ = [
     "save_ifc_file",
     "IfcModelPersistenceError",
     "persist_ifc_model",
+    "IfcProcessingError",
+    "IfcInvalidProcessingStateError",
+    "IfcProcessingPersistenceError",
+    "process_ifc_model",
 ]
