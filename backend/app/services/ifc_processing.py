@@ -3,10 +3,17 @@ IFC processing service.
 
 Transitions an IfcModel through:
     PENDING → PROCESSING → COMPLETED
-    PENDING → PROCESSING → FAILED  (on invalid/inaccessible/corrupt IFC)
+    PENDING → PROCESSING → FAILED  (on invalid/inaccessible/corrupt IFC,
+                                    or on extraction failure)
+
+Full processing pipeline (in order):
+    1. Parse IFC with IfcOpenShell.
+    2. Extract and persist spatial hierarchy (IfcProject … IfcSpace).
+    3. Extract and persist elements/types/containment.
+    4. Extract and persist PropertySets and Quantities.
+    5. Persist COMPLETED.
 
 Uses IfcOpenShell as the canonical IFC parser.
-Does not extract spatial structure, elements, or PropertySets.
 """
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +23,18 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.models.ifc_model import IfcModel
+from app.services.ifc_elements import (
+    IfcElementExtractionError,
+    extract_and_persist_elements,
+)
+from app.services.ifc_properties import (
+    IfcPropertyExtractionError,
+    extract_and_persist_element_properties,
+)
+from app.services.ifc_spatial import (
+    IfcSpatialExtractionError,
+    extract_and_persist_spatial_structure,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +126,10 @@ def process_ifc_model(
       2. Transition to PROCESSING and commit (IfcProcessingPersistenceError on failure).
       3. Resolve storage_path defensively (FAILED if invalid).
       4. Open file with IfcOpenShell (FAILED if missing, corrupt, or not valid IFC).
-      5. Transition to COMPLETED and commit (IfcProcessingPersistenceError on failure).
+      5. Extract spatial hierarchy (FAILED if IfcSpatialExtractionError).
+      6. Extract elements (FAILED if IfcElementExtractionError).
+      7. Extract properties/quantities (FAILED if IfcPropertyExtractionError).
+      8. Transition to COMPLETED and commit (IfcProcessingPersistenceError on failure).
 
     Returns the model after processing (COMPLETED or FAILED).
 
@@ -158,7 +180,31 @@ def process_ifc_model(
         return _persist_failed(db, model, "No se pudo procesar el archivo IFC.")
 
     # ------------------------------------------------------------------
-    # 5. Persist COMPLETED
+    # 5. Extract spatial hierarchy
+    # ------------------------------------------------------------------
+    try:
+        spatial_nodes = extract_and_persist_spatial_structure(db, model, ifc_file)
+    except IfcSpatialExtractionError:
+        return _persist_failed(db, model, "No se pudo procesar el archivo IFC.")
+
+    # ------------------------------------------------------------------
+    # 6. Extract elements
+    # ------------------------------------------------------------------
+    try:
+        elements = extract_and_persist_elements(db, model, ifc_file, spatial_nodes)
+    except IfcElementExtractionError:
+        return _persist_failed(db, model, "No se pudo procesar el archivo IFC.")
+
+    # ------------------------------------------------------------------
+    # 7. Extract properties / quantities
+    # ------------------------------------------------------------------
+    try:
+        extract_and_persist_element_properties(db, model, ifc_file, elements)
+    except IfcPropertyExtractionError:
+        return _persist_failed(db, model, "No se pudo procesar el archivo IFC.")
+
+    # ------------------------------------------------------------------
+    # 8. Persist COMPLETED — only reached when all extractors succeeded
     # ------------------------------------------------------------------
     model.ifc_schema = ifc_schema
     model.status = "COMPLETED"
