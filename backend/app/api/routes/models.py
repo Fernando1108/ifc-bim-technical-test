@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.api.dependencies.auth import get_current_user
@@ -6,6 +6,7 @@ from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.ifc_model import IfcModelResponse
+from app.services.ifc_background import process_ifc_model_background
 from app.services.ifc_models import IfcModelPersistenceError, persist_ifc_model
 from app.services.ifc_storage import (
     EmptyIfcFileError,
@@ -26,6 +27,7 @@ router = APIRouter(prefix="/models", tags=["models"])
 )
 async def upload_ifc(
     file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = ...,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -37,6 +39,7 @@ async def upload_ifc(
     - Accepts only files with .ifc extension (case-insensitive).
     - Stores the file locally using a UUID-based name.
     - Responds HTTP 201 with the model metadata (excludes storage_path and owner_id).
+    - Schedules background IFC processing only after successful persistence.
     """
     try:
         stored = await save_ifc_file(file, settings)
@@ -75,5 +78,9 @@ async def upload_ifc(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error interno al registrar el modelo.",
         )
+
+    # Schedule background processing only after successful persistence.
+    # The response is returned immediately with status PENDING.
+    background_tasks.add_task(process_ifc_model_background, ifc_model.id)
 
     return IfcModelResponse.model_validate(ifc_model)

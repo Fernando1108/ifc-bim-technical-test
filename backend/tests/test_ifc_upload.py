@@ -3,6 +3,13 @@ Tests for POST /api/v1/models (IFC upload endpoint) and persist_ifc_model servic
 
 Uses FastAPI TestClient with dependency overrides.
 No real PostgreSQL connection is made.
+
+Note on BackgroundTasks isolation:
+    TestClient (Starlette) executes background tasks synchronously during the
+    request. The `_noop_background` autouse fixture replaces
+    `process_ifc_model_background` with a no-op so tests never attempt a real
+    SessionLocal / PostgreSQL connection. Tests that need to verify scheduling
+    behaviour override this no-op with a capturing function via monkeypatch.
 """
 import io
 from datetime import datetime, timezone
@@ -19,6 +26,24 @@ from app.db.session import get_db
 from app.main import app
 from app.services.ifc_models import IfcModelPersistenceError, persist_ifc_model
 from app.services.ifc_storage import StoredIfcFile
+
+
+# ---------------------------------------------------------------------------
+# Autouse fixture — isolates BackgroundTasks from real DB
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _noop_background(monkeypatch):
+    """Replace process_ifc_model_background with a no-op for all tests in this module.
+
+    Tests that need to verify scheduling behaviour re-patch it with a capturing
+    function using their own monkeypatch call (which overrides this one, since
+    both share the same function-scoped monkeypatch instance).
+    """
+    monkeypatch.setattr(
+        "app.api.routes.models.process_ifc_model_background",
+        lambda model_id: None,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -706,3 +731,243 @@ def test_persistence_error_with_failing_unlink_returns_500(tmp_path, monkeypatch
     finally:
         app.dependency_overrides.clear()
         # monkeypatch restores Path.unlink automatically after the test.
+
+
+# ===========================================================================
+# BackgroundTasks scheduling tests
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# BG-1. Upload still returns 201 with background task enabled
+# ---------------------------------------------------------------------------
+
+def test_upload_still_returns_201_with_background(tmp_path, monkeypatch):
+    """BackgroundTasks addition must not affect the HTTP status code."""
+    fake_settings = _make_settings(tmp_path)
+    fake_user = _make_fake_user()
+    fake_model = _make_fake_model()
+
+    monkeypatch.setattr(
+        "app.api.routes.models.persist_ifc_model",
+        lambda db, user, stored: fake_model,
+    )
+
+    app.dependency_overrides[get_current_user] = lambda: fake_user
+    app.dependency_overrides[get_settings] = lambda: fake_settings
+    app.dependency_overrides[get_db] = _fake_db
+    try:
+        client = TestClient(app)
+        response = _upload_file(client)
+        assert response.status_code == 201
+    finally:
+        app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# BG-2. Immediate response body still shows status == "PENDING"
+# ---------------------------------------------------------------------------
+
+def test_response_body_status_pending_with_background(tmp_path, monkeypatch):
+    """Response is returned before processing completes — status must be PENDING."""
+    fake_settings = _make_settings(tmp_path)
+    fake_user = _make_fake_user()
+    fake_model = _make_fake_model(status="PENDING")
+
+    monkeypatch.setattr(
+        "app.api.routes.models.persist_ifc_model",
+        lambda db, user, stored: fake_model,
+    )
+
+    app.dependency_overrides[get_current_user] = lambda: fake_user
+    app.dependency_overrides[get_settings] = lambda: fake_settings
+    app.dependency_overrides[get_db] = _fake_db
+    try:
+        client = TestClient(app)
+        data = _upload_file(client).json()
+        assert data["status"] == "PENDING"
+    finally:
+        app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# BG-3. Background task receives exactly the id of the persisted IfcModel
+# ---------------------------------------------------------------------------
+
+def test_background_task_receives_model_id(tmp_path, monkeypatch):
+    """The task argument must equal ifc_model.id."""
+    fake_settings = _make_settings(tmp_path)
+    fake_user = _make_fake_user()
+    fake_model = _make_fake_model(id=77)
+
+    monkeypatch.setattr(
+        "app.api.routes.models.persist_ifc_model",
+        lambda db, user, stored: fake_model,
+    )
+
+    captured_ids: list = []
+    monkeypatch.setattr(
+        "app.api.routes.models.process_ifc_model_background",
+        lambda model_id: captured_ids.append(model_id),
+    )
+
+    app.dependency_overrides[get_current_user] = lambda: fake_user
+    app.dependency_overrides[get_settings] = lambda: fake_settings
+    app.dependency_overrides[get_db] = _fake_db
+    try:
+        client = TestClient(app)
+        _upload_file(client)
+        assert captured_ids == [77]
+    finally:
+        app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# BG-4. Background task receives only model_id (not the request db or user)
+# ---------------------------------------------------------------------------
+
+def test_background_task_receives_only_model_id(tmp_path, monkeypatch):
+    """Task must be called with exactly one positional arg (model_id)."""
+    fake_settings = _make_settings(tmp_path)
+    fake_user = _make_fake_user()
+    fake_model = _make_fake_model(id=7)
+
+    monkeypatch.setattr(
+        "app.api.routes.models.persist_ifc_model",
+        lambda db, user, stored: fake_model,
+    )
+
+    capturing_fn = MagicMock()
+    monkeypatch.setattr(
+        "app.api.routes.models.process_ifc_model_background",
+        capturing_fn,
+    )
+
+    app.dependency_overrides[get_current_user] = lambda: fake_user
+    app.dependency_overrides[get_settings] = lambda: fake_settings
+    app.dependency_overrides[get_db] = _fake_db
+    try:
+        client = TestClient(app)
+        _upload_file(client)
+        # assert called with exactly (7,) — no db, no user, no settings
+        capturing_fn.assert_called_once_with(7)
+    finally:
+        app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# BG-5. Background task is scheduled exactly once per successful upload
+# ---------------------------------------------------------------------------
+
+def test_background_task_scheduled_exactly_once(tmp_path, monkeypatch):
+    fake_settings = _make_settings(tmp_path)
+    fake_user = _make_fake_user()
+    fake_model = _make_fake_model(id=1)
+
+    monkeypatch.setattr(
+        "app.api.routes.models.persist_ifc_model",
+        lambda db, user, stored: fake_model,
+    )
+
+    count: list = []
+    monkeypatch.setattr(
+        "app.api.routes.models.process_ifc_model_background",
+        lambda model_id: count.append(model_id),
+    )
+
+    app.dependency_overrides[get_current_user] = lambda: fake_user
+    app.dependency_overrides[get_settings] = lambda: fake_settings
+    app.dependency_overrides[get_db] = _fake_db
+    try:
+        client = TestClient(app)
+        _upload_file(client)
+        assert len(count) == 1
+    finally:
+        app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# BG-6. persist_ifc_model failure → background task NOT scheduled
+# ---------------------------------------------------------------------------
+
+def test_background_task_not_scheduled_on_persist_failure(tmp_path, monkeypatch):
+    fake_settings = _make_settings(tmp_path)
+    fake_user = _make_fake_user()
+
+    def _failing_persist(db, user, stored):
+        raise IfcModelPersistenceError("DB error")
+
+    monkeypatch.setattr("app.api.routes.models.persist_ifc_model", _failing_persist)
+
+    count: list = []
+    monkeypatch.setattr(
+        "app.api.routes.models.process_ifc_model_background",
+        lambda model_id: count.append(model_id),
+    )
+
+    app.dependency_overrides[get_current_user] = lambda: fake_user
+    app.dependency_overrides[get_settings] = lambda: fake_settings
+    app.dependency_overrides[get_db] = _fake_db
+    try:
+        client = TestClient(app)
+        _upload_file(client)
+        assert count == []
+    finally:
+        app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# BG-7. Invalid extension → background task NOT scheduled
+# ---------------------------------------------------------------------------
+
+def test_background_task_not_scheduled_on_extension_error(tmp_path, monkeypatch):
+    fake_settings = _make_settings(tmp_path)
+    fake_user = _make_fake_user()
+
+    count: list = []
+    monkeypatch.setattr(
+        "app.api.routes.models.process_ifc_model_background",
+        lambda model_id: count.append(model_id),
+    )
+
+    app.dependency_overrides[get_current_user] = lambda: fake_user
+    app.dependency_overrides[get_settings] = lambda: fake_settings
+    app.dependency_overrides[get_db] = _fake_db
+    try:
+        client = TestClient(app)
+        _upload_file(client, filename="model.txt")  # invalid extension
+        assert count == []
+    finally:
+        app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# BG-8. Storage failure → background task NOT scheduled
+# ---------------------------------------------------------------------------
+
+def test_background_task_not_scheduled_on_storage_error(tmp_path, monkeypatch):
+    from app.services.ifc_storage import IfcStorageError
+
+    fake_settings = _make_settings(tmp_path)
+    fake_user = _make_fake_user()
+
+    async def _failing_save(upload, settings):
+        await upload.close()
+        raise IfcStorageError("Filesystem error")
+
+    monkeypatch.setattr("app.api.routes.models.save_ifc_file", _failing_save)
+
+    count: list = []
+    monkeypatch.setattr(
+        "app.api.routes.models.process_ifc_model_background",
+        lambda model_id: count.append(model_id),
+    )
+
+    app.dependency_overrides[get_current_user] = lambda: fake_user
+    app.dependency_overrides[get_settings] = lambda: fake_settings
+    app.dependency_overrides[get_db] = _fake_db
+    try:
+        client = TestClient(app)
+        _upload_file(client)
+        assert count == []
+    finally:
+        app.dependency_overrides.clear()

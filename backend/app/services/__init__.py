@@ -20,6 +20,7 @@ from app.services.ifc_processing import (
     IfcProcessingPersistenceError,
     process_ifc_model,
 )
+from app.services.ifc_background import process_ifc_model_background
 
 __all__ = [
     "InvalidCredentialsError",
@@ -39,4 +40,5 @@ __all__ = [
     "IfcInvalidProcessingStateError",
     "IfcProcessingPersistenceError",
     "process_ifc_model",
+    "process_ifc_model_background",
 ]
