@@ -36,6 +36,9 @@ def test_expected_columns_exist():
         "processed_at",
         "created_at",
         "updated_at",
+        "spatial_node_count",
+        "element_count",
+        "property_count",
     }
     actual = set(_TABLE.c.keys())
     assert actual == expected
@@ -161,6 +164,76 @@ def test_check_constraint_file_size_positive():
 
 def test_check_constraint_status():
     assert "ck_ifc_models_status" in _constraint_names()
+
+
+# ---------------------------------------------------------------------------
+# Counter columns — existence, nullability, defaults, CHECK constraints
+# ---------------------------------------------------------------------------
+
+def test_spatial_node_count_exists():
+    assert "spatial_node_count" in _TABLE.c
+
+
+def test_element_count_exists():
+    assert "element_count" in _TABLE.c
+
+
+def test_property_count_exists():
+    assert "property_count" in _TABLE.c
+
+
+def test_spatial_node_count_not_nullable():
+    assert _col("spatial_node_count").nullable is False
+
+
+def test_element_count_not_nullable():
+    assert _col("element_count").nullable is False
+
+
+def test_property_count_not_nullable():
+    assert _col("property_count").nullable is False
+
+
+def test_spatial_node_count_default():
+    assert _col("spatial_node_count").default.arg == 0
+
+
+def test_element_count_default():
+    assert _col("element_count").default.arg == 0
+
+
+def test_property_count_default():
+    assert _col("property_count").default.arg == 0
+
+
+def test_spatial_node_count_server_default():
+    sd = _col("spatial_node_count").server_default
+    assert sd is not None
+    assert "0" in str(getattr(sd, "arg", sd))
+
+
+def test_element_count_server_default():
+    sd = _col("element_count").server_default
+    assert sd is not None
+    assert "0" in str(getattr(sd, "arg", sd))
+
+
+def test_property_count_server_default():
+    sd = _col("property_count").server_default
+    assert sd is not None
+    assert "0" in str(getattr(sd, "arg", sd))
+
+
+def test_check_constraint_spatial_node_count_nonnegative():
+    assert "ck_ifc_models_spatial_node_count_nonnegative" in _constraint_names()
+
+
+def test_check_constraint_element_count_nonnegative():
+    assert "ck_ifc_models_element_count_nonnegative" in _constraint_names()
+
+
+def test_check_constraint_property_count_nonnegative():
+    assert "ck_ifc_models_property_count_nonnegative" in _constraint_names()
 
 
 # ---------------------------------------------------------------------------

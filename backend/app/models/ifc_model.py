@@ -34,6 +34,18 @@ class IfcModel(Base):
             "status IN ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED')",
             name="ck_ifc_models_status",
         ),
+        CheckConstraint(
+            "spatial_node_count >= 0",
+            name="ck_ifc_models_spatial_node_count_nonnegative",
+        ),
+        CheckConstraint(
+            "element_count >= 0",
+            name="ck_ifc_models_element_count_nonnegative",
+        ),
+        CheckConstraint(
+            "property_count >= 0",
+            name="ck_ifc_models_property_count_nonnegative",
+        ),
         Index("ix_ifc_models_owner_id", "owner_id"),
         Index("ix_ifc_models_status", "status"),
         Index("ix_ifc_models_sha256", "sha256"),
@@ -87,4 +99,25 @@ class IfcModel(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
+    )
+
+    spatial_node_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+
+    element_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+
+    property_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
     )
