@@ -21,6 +21,11 @@ from app.services.ifc_processing import (
     process_ifc_model,
 )
 from app.services.ifc_background import process_ifc_model_background
+from app.services.ifc_queries import (
+    IfcModelQueryError,
+    get_ifc_model_for_owner,
+    list_ifc_models_for_owner,
+)
 
 __all__ = [
     "InvalidCredentialsError",
@@ -41,4 +46,7 @@ __all__ = [
     "IfcProcessingPersistenceError",
     "process_ifc_model",
     "process_ifc_model_background",
+    "IfcModelQueryError",
+    "get_ifc_model_for_owner",
+    "list_ifc_models_for_owner",
 ]
