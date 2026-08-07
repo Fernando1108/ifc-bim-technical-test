@@ -1,4 +1,5 @@
 import functools
+from pathlib import Path
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings
@@ -15,6 +16,9 @@ class Settings(BaseSettings):
     jwt_secret_key: SecretStr
     access_token_expire_minutes: int = Field(default=30, gt=0)
 
+    ifc_storage_dir: Path = Path("/app/storage")
+    ifc_max_file_size_mb: int = Field(default=50, gt=0, le=50)
+
     model_config = {"extra": "ignore"}
 
     @property
@@ -27,6 +31,10 @@ class Settings(BaseSettings):
             port=self.postgres_internal_port,
             database=self.postgres_db,
         )
+
+    @property
+    def ifc_max_file_size_bytes(self) -> int:
+        return self.ifc_max_file_size_mb * 1024 * 1024
 
 
 @functools.lru_cache

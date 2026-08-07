@@ -25,6 +25,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      IFC_STORAGE_DIR: ${IFC_STORAGE_DIR:-/app/storage}
+      IFC_MAX_FILE_SIZE_MB: ${IFC_MAX_FILE_SIZE_MB:-50}
+    volumes:
+      - ./storage:/app/storage
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     healthcheck:
