@@ -1,3 +1,13 @@
-from app.services.users import UserAlreadyExistsError, register_user
+from app.services.users import (
+    InvalidCredentialsError,
+    UserAlreadyExistsError,
+    authenticate_user,
+    register_user,
+)
 
-__all__ = ["UserAlreadyExistsError", "register_user"]
+__all__ = [
+    "InvalidCredentialsError",
+    "UserAlreadyExistsError",
+    "authenticate_user",
+    "register_user",
+]

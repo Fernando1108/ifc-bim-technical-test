@@ -1,12 +1,16 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.security import hash_password
+from app.core.security import hash_password, verify_password
 from app.models.user import User
 from app.schemas.auth import RegisterRequest
 
 
 class UserAlreadyExistsError(Exception):
+    pass
+
+
+class InvalidCredentialsError(Exception):
     pass
 
 
@@ -24,4 +28,15 @@ def register_user(db: Session, payload: RegisterRequest) -> User:
     db.add(user)
     db.commit()
     db.refresh(user)
+    return user
+
+
+def authenticate_user(db: Session, email: str, password: str) -> User:
+    normalized_email = email.strip().lower()
+
+    user = db.scalar(select(User).where(User.email == normalized_email))
+
+    if user is None or not user.is_active or not verify_password(password, user.hashed_password):
+        raise InvalidCredentialsError
+
     return user
