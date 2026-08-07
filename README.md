@@ -263,8 +263,44 @@ Esta implementación no ha sido auditada para entornos de producción.
 
 **Backend**
 
+El entorno de referencia del backend y de las pruebas es Python 3.12. Para ejecutarlas localmente, se recomienda utilizar un entorno virtual aislado e instalar las dependencias definidas en `backend/requirements-dev.txt`.
+
+Instalación de dependencias:
+
+```bash
+python -m pip install -r backend/requirements-dev.txt
+```
+
+Ejecución:
+
 ```bash
 python -m pytest backend/tests -q
+```
+
+Como alternativa reproducible, las pruebas pueden ejecutarse dentro de un contenedor temporal con Python 3.12.
+
+**PowerShell**
+
+```powershell
+$repo = (Get-Location).Path
+
+docker run --rm `
+    -v "${repo}:/workspace" `
+    -w /workspace/backend `
+    -e PYTHONDONTWRITEBYTECODE=1 `
+    python:3.12-slim `
+    sh -lc "pip install --no-cache-dir -r requirements-dev.txt && python -m pytest -p no:cacheprovider tests -q"
+```
+
+**Linux/macOS**
+
+```bash
+docker run --rm \
+    -v "$PWD:/workspace" \
+    -w /workspace/backend \
+    -e PYTHONDONTWRITEBYTECODE=1 \
+    python:3.12-slim \
+    sh -lc "pip install --no-cache-dir -r requirements-dev.txt && python -m pytest -p no:cacheprovider tests -q"
 ```
 
 **Compilación backend**
