@@ -34,6 +34,10 @@ from app.services.ifc_elements import (
     IfcElementExtractionError,
     extract_and_persist_elements,
 )
+from app.services.ifc_properties import (
+    IfcPropertyExtractionError,
+    extract_and_persist_element_properties,
+)
 
 __all__ = [
     "InvalidCredentialsError",
@@ -61,4 +65,6 @@ __all__ = [
     "extract_and_persist_spatial_structure",
     "IfcElementExtractionError",
     "extract_and_persist_elements",
+    "IfcPropertyExtractionError",
+    "extract_and_persist_element_properties",
 ]
