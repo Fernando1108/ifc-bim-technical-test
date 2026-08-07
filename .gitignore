@@ -29,6 +29,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Generated viewer assets (copied from node_modules at build time)
+frontend/public/vendor/
+
 # Local IFC storage
 storage/*
 !storage/.gitkeep

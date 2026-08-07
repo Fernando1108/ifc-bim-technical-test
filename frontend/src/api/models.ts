@@ -61,3 +61,14 @@ export async function uploadModel(token: string, file: File): Promise<IfcModel> 
   if (!response.ok) throw await parseErrorResponse(response)
   return response.json() as Promise<IfcModel>
 }
+
+export async function getModelFile(
+  token: string,
+  modelId: number,
+): Promise<ArrayBuffer> {
+  const response = await fetch(`${API_BASE_URL}/models/${modelId}/file`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) throw await parseErrorResponse(response)
+  return response.arrayBuffer()
+}

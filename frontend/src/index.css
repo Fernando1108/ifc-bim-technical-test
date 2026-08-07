@@ -386,15 +386,46 @@ input:disabled {
   word-break: break-all;
 }
 
-/* Viewer placeholder */
-.viewer-placeholder {
-  font-size: 0.875rem;
-  color: #6b7280;
-  background: #f9fafb;
-  border: 1px dashed #d1d5db;
+/* ===========================================================================
+   3D Viewer (IfcViewer component)
+   =========================================================================== */
+
+.viewer-wrapper {
+  position: relative;
+  width: 100%;
+  height: 500px;
+  background: #0f172a;
   border-radius: 6px;
-  padding: 0.75rem 1rem;
-  margin-top: 0.5rem;
+  overflow: hidden;
+  margin-top: 1rem;
+}
+
+.viewer-canvas-container {
+  width: 100%;
+  height: 100%;
+}
+
+.viewer-canvas-container canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.viewer-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  background: rgba(15, 23, 42, 0.82);
+}
+
+.viewer-loading-text {
+  color: #e2e8f0;
+  font-size: 0.9rem;
+  margin: 0;
 }
 
 /* Status badges */
