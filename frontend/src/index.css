@@ -387,8 +387,16 @@ input:disabled {
 }
 
 /* ===========================================================================
-   3D Viewer (IfcViewer component)
+   3D Viewer + BIM Panel layout
    =========================================================================== */
+
+.viewer-bim-layout {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  align-items: start;
+}
 
 .viewer-wrapper {
   position: relative;
@@ -397,7 +405,6 @@ input:disabled {
   background: #0f172a;
   border-radius: 6px;
   overflow: hidden;
-  margin-top: 1rem;
 }
 
 .viewer-canvas-container {
@@ -426,6 +433,112 @@ input:disabled {
   color: #e2e8f0;
   font-size: 0.9rem;
   margin: 0;
+}
+
+/* BIM panel */
+.bim-panel {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 0.75rem;
+  max-height: 500px;
+  overflow-y: auto;
+  font-size: 0.82rem;
+}
+
+.bim-panel-empty {
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
+.bim-panel-prompt,
+.bim-panel-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 80px;
+}
+
+.bim-hint {
+  color: #6b7280;
+  font-size: 0.82rem;
+  text-align: center;
+  margin: 0;
+  padding: 0 0.5rem;
+}
+
+.bim-section {
+  margin-bottom: 0.75rem;
+}
+
+.bim-section:last-child {
+  margin-bottom: 0;
+}
+
+.bim-section-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6b7280;
+  border-bottom: 1px solid #f3f4f6;
+  padding-bottom: 0.25rem;
+  margin-bottom: 0.4rem;
+}
+
+.bim-row {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 0.25rem 0.5rem;
+  padding: 0.15rem 0;
+}
+
+.bim-label {
+  font-weight: 600;
+  color: #6b7280;
+  font-size: 0.78rem;
+  align-self: start;
+  padding-top: 1px;
+}
+
+.bim-value {
+  color: #111827;
+  word-break: break-word;
+}
+
+.bim-value-mono {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.75rem;
+  word-break: break-all;
+}
+
+.bim-type-tag {
+  color: #9ca3af;
+  font-size: 0.75em;
+}
+
+.bim-prop-group {
+  margin-bottom: 0.5rem;
+}
+
+.bim-prop-group:last-child {
+  margin-bottom: 0;
+}
+
+.bim-prop-group-header {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #374151;
+  background: #f9fafb;
+  border-radius: 3px;
+  padding: 0.15rem 0.4rem;
+  margin-bottom: 0.2rem;
+}
+
+.bim-row-prop .bim-label {
+  font-weight: 400;
+  padding-left: 0.25rem;
 }
 
 /* Status badges */
@@ -462,6 +575,16 @@ input:disabled {
 /* ===========================================================================
    Responsive
    =========================================================================== */
+
+@media (max-width: 1100px) {
+  .viewer-bim-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .bim-panel {
+    max-height: 320px;
+  }
+}
 
 @media (max-width: 768px) {
   .dashboard-body {

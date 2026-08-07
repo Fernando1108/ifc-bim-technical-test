@@ -72,3 +72,65 @@ export async function getModelFile(
   if (!response.ok) throw await parseErrorResponse(response)
   return response.arrayBuffer()
 }
+
+// ---------------------------------------------------------------------------
+// IFC element detail types
+// ---------------------------------------------------------------------------
+
+export type IfcPropertyValueKind = "TEXT" | "NUMBER" | "BOOLEAN" | "NULL"
+
+export interface IfcSpatialNodeSummary {
+  ifc_entity_id: number
+  global_id: string
+  ifc_type: string
+  name: string | null
+  description: string | null
+  long_name: string | null
+  elevation: number | null
+}
+
+export interface IfcElementProperty {
+  group_type: "PSET" | "QTO"
+  group_name: string
+  property_name: string
+  value_kind: IfcPropertyValueKind
+  ifc_value_type: string | null
+  value_text: string | null
+  value_number: number | null
+  value_boolean: boolean | null
+  unit: string | null
+}
+
+export interface IfcElementDetail {
+  ifc_entity_id: number
+  global_id: string
+  ifc_type: string
+  name: string | null
+  description: string | null
+  object_type: string | null
+  tag: string | null
+  predefined_type: string | null
+  type_global_id: string | null
+  type_ifc_type: string | null
+  type_name: string | null
+  direct_spatial: IfcSpatialNodeSummary | null
+  resolved_storey: IfcSpatialNodeSummary | null
+  properties: IfcElementProperty[]
+}
+
+export async function getElementDetail(
+  token: string,
+  modelId: number,
+  globalId: string,
+  signal?: AbortSignal,
+): Promise<IfcElementDetail> {
+  const response = await fetch(
+    `${API_BASE_URL}/models/${modelId}/elements/${encodeURIComponent(globalId)}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      signal,
+    },
+  )
+  if (!response.ok) throw await parseErrorResponse(response)
+  return response.json() as Promise<IfcElementDetail>
+}
