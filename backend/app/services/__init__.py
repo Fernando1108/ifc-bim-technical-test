@@ -30,6 +30,10 @@ from app.services.ifc_spatial import (
     IfcSpatialExtractionError,
     extract_and_persist_spatial_structure,
 )
+from app.services.ifc_elements import (
+    IfcElementExtractionError,
+    extract_and_persist_elements,
+)
 
 __all__ = [
     "InvalidCredentialsError",
@@ -55,4 +59,6 @@ __all__ = [
     "list_ifc_models_for_owner",
     "IfcSpatialExtractionError",
     "extract_and_persist_spatial_structure",
+    "IfcElementExtractionError",
+    "extract_and_persist_elements",
 ]
