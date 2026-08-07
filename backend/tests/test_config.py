@@ -83,3 +83,43 @@ def test_access_token_expire_minutes_rejects_zero():
 def test_access_token_expire_minutes_rejects_negative():
     with pytest.raises(ValidationError):
         _make_settings(access_token_expire_minutes=-1)
+
+
+# ---------------------------------------------------------------------------
+# IFC storage configuration
+# ---------------------------------------------------------------------------
+
+def test_ifc_storage_dir_default():
+    from pathlib import Path
+    settings = _make_settings()
+    assert settings.ifc_storage_dir == Path("/app/storage")
+
+
+def test_ifc_max_file_size_mb_default():
+    settings = _make_settings()
+    assert settings.ifc_max_file_size_mb == 50
+
+
+def test_ifc_max_file_size_bytes_50mb():
+    settings = _make_settings()
+    assert settings.ifc_max_file_size_bytes == 52428800
+
+
+def test_ifc_max_file_size_bytes_10mb():
+    settings = _make_settings(ifc_max_file_size_mb=10)
+    assert settings.ifc_max_file_size_bytes == 10485760
+
+
+def test_ifc_max_file_size_mb_rejects_zero():
+    with pytest.raises(ValidationError):
+        _make_settings(ifc_max_file_size_mb=0)
+
+
+def test_ifc_max_file_size_mb_rejects_negative():
+    with pytest.raises(ValidationError):
+        _make_settings(ifc_max_file_size_mb=-1)
+
+
+def test_ifc_max_file_size_mb_rejects_above_max():
+    with pytest.raises(ValidationError):
+        _make_settings(ifc_max_file_size_mb=51)
