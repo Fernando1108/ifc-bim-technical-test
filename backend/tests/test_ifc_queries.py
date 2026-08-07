@@ -566,3 +566,430 @@ class TestAuthRequired:
     def test_detail_without_token_returns_401(self):
         client = TestClient(app)
         assert client.get(_DETAIL_URL.format(1)).status_code == 401
+
+
+# ===========================================================================
+# ENDPOINT TESTS — GET /api/v1/models/{model_id}/file
+# ===========================================================================
+
+_FILE_URL = "/api/v1/models/{}/file"
+
+_IFC_BYTES = b"ISO-10303-21; QA IFC; END-ISO-10303-21;"
+
+
+def _make_completed_model(tmp_path, storage_filename="stored-model.ifc"):
+    """Return a fake model with status COMPLETED and a resolvable storage_path."""
+    return _make_fake_model(
+        status="COMPLETED",
+        storage_path=storage_filename,
+        original_filename="proyecto.ifc",
+    )
+
+
+def _write_ifc(tmp_path, filename="stored-model.ifc", content=_IFC_BYTES):
+    p = tmp_path / filename
+    p.write_bytes(content)
+    return p
+
+
+class TestDownloadIfcFileEndpoint:
+    """Tests for GET /api/v1/models/{model_id}/file."""
+
+    def _client(
+        self,
+        monkeypatch,
+        tmp_path,
+        model=None,
+        raise_error=False,
+        user=None,
+    ):
+        fake_user = user or _make_fake_user()
+
+        if raise_error:
+            def _svc(db, model_id, owner_id):
+                raise IfcModelQueryError("DB error")
+        else:
+            result = model
+
+            def _svc(db, model_id, owner_id):
+                return result
+
+        monkeypatch.setattr("app.api.routes.models.get_ifc_model_for_owner", _svc)
+
+        from app.core.config import get_settings
+        from types import SimpleNamespace
+
+        def _fake_settings():
+            return SimpleNamespace(ifc_storage_dir=tmp_path)
+
+        app.dependency_overrides[get_current_user] = lambda: fake_user
+        app.dependency_overrides[get_db] = _fake_db
+        app.dependency_overrides[get_settings] = _fake_settings
+        return TestClient(app)
+
+    def _cleanup(self):
+        app.dependency_overrides.clear()
+
+    # -----------------------------------------------------------------------
+    # 1. COMPLETED own model with real file → 200
+    # -----------------------------------------------------------------------
+
+    def test_completed_own_model_returns_200(self, monkeypatch, tmp_path):
+        _write_ifc(tmp_path)
+        model = _make_completed_model(tmp_path)
+        client = self._client(monkeypatch, tmp_path, model=model)
+        try:
+            resp = client.get(_FILE_URL.format(1))
+            assert resp.status_code == 200
+        finally:
+            self._cleanup()
+
+    # -----------------------------------------------------------------------
+    # 2. Response content matches file bytes exactly
+    # -----------------------------------------------------------------------
+
+    def test_response_content_matches_file_bytes(self, monkeypatch, tmp_path):
+        _write_ifc(tmp_path)
+        model = _make_completed_model(tmp_path)
+        client = self._client(monkeypatch, tmp_path, model=model)
+        try:
+            resp = client.get(_FILE_URL.format(1))
+            assert resp.content == _IFC_BYTES
+        finally:
+            self._cleanup()
+
+    # -----------------------------------------------------------------------
+    # 3. Content-Type starts with application/octet-stream
+    # -----------------------------------------------------------------------
+
+    def test_content_type_octet_stream(self, monkeypatch, tmp_path):
+        _write_ifc(tmp_path)
+        model = _make_completed_model(tmp_path)
+        client = self._client(monkeypatch, tmp_path, model=model)
+        try:
+            resp = client.get(_FILE_URL.format(1))
+            assert resp.headers["content-type"].startswith("application/octet-stream")
+        finally:
+            self._cleanup()
+
+    # -----------------------------------------------------------------------
+    # 4. Content-Disposition contains original_filename, not storage_path
+    # -----------------------------------------------------------------------
+
+    def test_content_disposition_uses_original_filename(self, monkeypatch, tmp_path):
+        _write_ifc(tmp_path)
+        model = _make_completed_model(tmp_path)
+        # original_filename="proyecto.ifc", storage_path="stored-model.ifc"
+        assert model.original_filename != model.storage_path
+        client = self._client(monkeypatch, tmp_path, model=model)
+        try:
+            resp = client.get(_FILE_URL.format(1))
+            disposition = resp.headers.get("content-disposition", "")
+            assert model.original_filename in disposition
+            assert model.storage_path not in disposition
+        finally:
+            self._cleanup()
+
+    # -----------------------------------------------------------------------
+    # 5. PENDING → 409
+    # -----------------------------------------------------------------------
+
+    def test_pending_returns_409(self, monkeypatch, tmp_path):
+        model = _make_fake_model(status="PENDING", storage_path="f.ifc")
+        client = self._client(monkeypatch, tmp_path, model=model)
+        try:
+            resp = client.get(_FILE_URL.format(1))
+            assert resp.status_code == 409
+            assert resp.json()["detail"] == "El archivo IFC no está disponible para visualización."
+        finally:
+            self._cleanup()
+
+    # -----------------------------------------------------------------------
+    # 6. PROCESSING → 409
+    # -----------------------------------------------------------------------
+
+    def test_processing_returns_409(self, monkeypatch, tmp_path):
+        model = _make_fake_model(status="PROCESSING", storage_path="f.ifc")
+        client = self._client(monkeypatch, tmp_path, model=model)
+        try:
+            resp = client.get(_FILE_URL.format(1))
+            assert resp.status_code == 409
+            assert resp.json()["detail"] == "El archivo IFC no está disponible para visualización."
+        finally:
+            self._cleanup()
+
+    # -----------------------------------------------------------------------
+    # 7. FAILED → 409
+    # -----------------------------------------------------------------------
+
+    def test_failed_returns_409(self, monkeypatch, tmp_path):
+        model = _make_fake_model(status="FAILED", storage_path="f.ifc")
+        client = self._client(monkeypatch, tmp_path, model=model)
+        try:
+            resp = client.get(_FILE_URL.format(1))
+            assert resp.status_code == 409
+            assert resp.json()["detail"] == "El archivo IFC no está disponible para visualización."
+        finally:
+            self._cleanup()
+
+    # -----------------------------------------------------------------------
+    # 8. Model not found (service returns None) → 404
+    # -----------------------------------------------------------------------
+
+    def test_model_not_found_returns_404(self, monkeypatch, tmp_path):
+        client = self._client(monkeypatch, tmp_path, model=None)
+        try:
+            resp = client.get(_FILE_URL.format(999))
+            assert resp.status_code == 404
+            assert resp.json()["detail"] == "Modelo IFC no encontrado."
+        finally:
+            self._cleanup()
+
+    # -----------------------------------------------------------------------
+    # 9. Different owner (service returns None) → same 404 as not found (IDOR)
+    # -----------------------------------------------------------------------
+
+    def test_different_owner_indistinguishable_404(self, monkeypatch, tmp_path):
+        """IDOR guard: a model owned by another user must return identical 404."""
+        client = self._client(monkeypatch, tmp_path, model=None)
+        try:
+            resp = client.get(_FILE_URL.format(1))
+            assert resp.status_code == 404
+            assert resp.json()["detail"] == "Modelo IFC no encontrado."
+        finally:
+            self._cleanup()
+
+    # -----------------------------------------------------------------------
+    # 10. IfcModelQueryError → 500
+    # -----------------------------------------------------------------------
+
+    def test_query_error_returns_500(self, monkeypatch, tmp_path):
+        client = self._client(monkeypatch, tmp_path, raise_error=True)
+        try:
+            resp = client.get(_FILE_URL.format(1))
+            assert resp.status_code == 500
+            assert resp.json()["detail"] == "Error interno al consultar el modelo."
+        finally:
+            self._cleanup()
+
+    # -----------------------------------------------------------------------
+    # 11. COMPLETED but file missing → 404
+    # -----------------------------------------------------------------------
+
+    def test_completed_file_missing_returns_404(self, monkeypatch, tmp_path):
+        model = _make_completed_model(tmp_path)
+        # Do NOT create the file
+        client = self._client(monkeypatch, tmp_path, model=model)
+        try:
+            resp = client.get(_FILE_URL.format(1))
+            assert resp.status_code == 404
+            assert resp.json()["detail"] == "Archivo IFC no disponible."
+        finally:
+            self._cleanup()
+
+    # -----------------------------------------------------------------------
+    # 12. Absolute storage_path → 500 (path traversal guard)
+    # -----------------------------------------------------------------------
+
+    def test_absolute_storage_path_returns_500(self, monkeypatch, tmp_path):
+        model = _make_fake_model(status="COMPLETED", storage_path="/etc/passwd.ifc")
+        client = self._client(monkeypatch, tmp_path, model=model)
+        try:
+            resp = client.get(_FILE_URL.format(1))
+            assert resp.status_code == 500
+            assert resp.json()["detail"] == "Error interno al acceder al archivo IFC."
+            # Must not leak any path detail
+            assert "/etc" not in resp.json()["detail"]
+        finally:
+            self._cleanup()
+
+    # -----------------------------------------------------------------------
+    # 13. Path traversal storage_path → 500
+    # -----------------------------------------------------------------------
+
+    def test_path_traversal_returns_500(self, monkeypatch, tmp_path):
+        model = _make_fake_model(status="COMPLETED", storage_path="../secret.ifc")
+        client = self._client(monkeypatch, tmp_path, model=model)
+        try:
+            resp = client.get(_FILE_URL.format(1))
+            assert resp.status_code == 500
+            assert resp.json()["detail"] == "Error interno al acceder al archivo IFC."
+        finally:
+            self._cleanup()
+
+    # -----------------------------------------------------------------------
+    # 14. Subdirectory storage_path → 500
+    # -----------------------------------------------------------------------
+
+    def test_subdirectory_storage_path_returns_500(self, monkeypatch, tmp_path):
+        model = _make_fake_model(status="COMPLETED", storage_path="subdir/model.ifc")
+        client = self._client(monkeypatch, tmp_path, model=model)
+        try:
+            resp = client.get(_FILE_URL.format(1))
+            assert resp.status_code == 500
+            assert resp.json()["detail"] == "Error interno al acceder al archivo IFC."
+        finally:
+            self._cleanup()
+
+    # -----------------------------------------------------------------------
+    # 15. Symlink pointing outside storage root → 500
+    # -----------------------------------------------------------------------
+
+    def test_symlink_escape_returns_500(self, monkeypatch, tmp_path):
+        import os
+        # Create a real file outside storage root
+        outside = tmp_path.parent / "outside-secret.ifc"
+        outside.write_bytes(b"secret")
+        link_name = "linked-model.ifc"
+        link_path = tmp_path / link_name
+        try:
+            link_path.symlink_to(outside)
+        except (OSError, NotImplementedError):
+            pytest.skip("Symlinks not supported on this platform")
+
+        model = _make_fake_model(status="COMPLETED", storage_path=link_name)
+        client = self._client(monkeypatch, tmp_path, model=model)
+        try:
+            resp = client.get(_FILE_URL.format(1))
+            assert resp.status_code == 500
+            assert resp.json()["detail"] == "Error interno al acceder al archivo IFC."
+        finally:
+            self._cleanup()
+            outside.unlink(missing_ok=True)
+
+    # -----------------------------------------------------------------------
+    # 16. Directory with storage_path name → 404
+    # -----------------------------------------------------------------------
+
+    def test_directory_as_storage_path_returns_404(self, monkeypatch, tmp_path):
+        dirname = "some-dir.ifc"
+        (tmp_path / dirname).mkdir()
+        model = _make_fake_model(status="COMPLETED", storage_path=dirname)
+        client = self._client(monkeypatch, tmp_path, model=model)
+        try:
+            resp = client.get(_FILE_URL.format(1))
+            assert resp.status_code == 404
+            assert resp.json()["detail"] == "Archivo IFC no disponible."
+        finally:
+            self._cleanup()
+
+    # -----------------------------------------------------------------------
+    # 17. Endpoint is read-only — no DB commit or flush
+    # -----------------------------------------------------------------------
+
+    def test_endpoint_does_not_commit_or_flush(self, monkeypatch, tmp_path):
+        _write_ifc(tmp_path)
+        model = _make_completed_model(tmp_path)
+        fake_db = MagicMock()
+        fake_db_called = {"commit": 0, "flush": 0}
+
+        def _tracking_db():
+            db = MagicMock()
+            db.commit.side_effect = lambda: fake_db_called.__setitem__("commit", fake_db_called["commit"] + 1)
+            db.flush.side_effect = lambda: fake_db_called.__setitem__("flush", fake_db_called["flush"] + 1)
+            yield db
+
+        monkeypatch.setattr("app.api.routes.models.get_ifc_model_for_owner",
+                            lambda db, model_id, owner_id: model)
+
+        from app.core.config import get_settings
+        from types import SimpleNamespace
+
+        def _fake_settings():
+            return SimpleNamespace(ifc_storage_dir=tmp_path)
+
+        app.dependency_overrides[get_current_user] = lambda: _make_fake_user()
+        app.dependency_overrides[get_db] = _tracking_db
+        app.dependency_overrides[get_settings] = _fake_settings
+        try:
+            client = TestClient(app)
+            client.get(_FILE_URL.format(1))
+            assert fake_db_called["commit"] == 0
+            assert fake_db_called["flush"] == 0
+        finally:
+            self._cleanup()
+
+    # -----------------------------------------------------------------------
+    # 18. No auth token → 401
+    # -----------------------------------------------------------------------
+
+    def test_no_auth_token_returns_401(self, tmp_path):
+        # No dependency overrides — real get_current_user rejects missing token
+        client = TestClient(app)
+        assert client.get(_FILE_URL.format(1)).status_code == 401
+
+    # -----------------------------------------------------------------------
+    # 19. Sensitive storage_path not leaked in error response body
+    # -----------------------------------------------------------------------
+
+    def test_sensitive_path_not_leaked_in_error(self, monkeypatch, tmp_path):
+        sensitive_path = "/very/secret/path/model.ifc"
+        model = _make_fake_model(status="COMPLETED", storage_path=sensitive_path)
+        client = self._client(monkeypatch, tmp_path, model=model)
+        try:
+            resp = client.get(_FILE_URL.format(1))
+            body = resp.text
+            assert sensitive_path not in body
+            assert "/very/secret" not in body
+            assert str(tmp_path) not in body
+        finally:
+            self._cleanup()
+
+    # -----------------------------------------------------------------------
+    # 20. Windows absolute path (C:\secret\model.ifc) → 500
+    # -----------------------------------------------------------------------
+
+    def test_windows_absolute_path_returns_500(self, monkeypatch, tmp_path):
+        model = _make_fake_model(status="COMPLETED", storage_path=r"C:\secret\model.ifc")
+        client = self._client(monkeypatch, tmp_path, model=model)
+        try:
+            resp = client.get(_FILE_URL.format(1))
+            assert resp.status_code == 500
+            assert resp.json()["detail"] == "Error interno al acceder al archivo IFC."
+            body = resp.text
+            assert r"C:\secret" not in body
+            assert model.storage_path not in body
+        finally:
+            self._cleanup()
+
+    # -----------------------------------------------------------------------
+    # 21. Windows relative with backslash (subdir\model.ifc) → 500
+    # -----------------------------------------------------------------------
+
+    def test_windows_backslash_subdir_returns_500(self, monkeypatch, tmp_path):
+        model = _make_fake_model(status="COMPLETED", storage_path=r"subdir\model.ifc")
+        client = self._client(monkeypatch, tmp_path, model=model)
+        try:
+            resp = client.get(_FILE_URL.format(1))
+            assert resp.status_code == 500
+            assert resp.json()["detail"] == "Error interno al acceder al archivo IFC."
+        finally:
+            self._cleanup()
+
+    # -----------------------------------------------------------------------
+    # 22. Windows drive-relative path (C:model.ifc) → 500
+    # -----------------------------------------------------------------------
+
+    def test_windows_drive_relative_returns_500(self, monkeypatch, tmp_path):
+        model = _make_fake_model(status="COMPLETED", storage_path=r"C:model.ifc")
+        client = self._client(monkeypatch, tmp_path, model=model)
+        try:
+            resp = client.get(_FILE_URL.format(1))
+            assert resp.status_code == 500
+            assert resp.json()["detail"] == "Error interno al acceder al archivo IFC."
+        finally:
+            self._cleanup()
+
+    # -----------------------------------------------------------------------
+    # 23. Windows UNC path (\\server\share\model.ifc) → 500
+    # -----------------------------------------------------------------------
+
+    def test_windows_unc_path_returns_500(self, monkeypatch, tmp_path):
+        model = _make_fake_model(status="COMPLETED", storage_path=r"\\server\share\model.ifc")
+        client = self._client(monkeypatch, tmp_path, model=model)
+        try:
+            resp = client.get(_FILE_URL.format(1))
+            assert resp.status_code == 500
+            assert resp.json()["detail"] == "Error interno al acceder al archivo IFC."
+        finally:
+            self._cleanup()
