@@ -4,6 +4,7 @@ IFC processing service.
 Transitions an IfcModel through:
     PENDING → PROCESSING → COMPLETED
     PENDING → PROCESSING → FAILED  (on invalid/inaccessible/corrupt IFC,
+                                    unsupported IFC schema,
                                     or on extraction failure)
 
 Full processing pipeline (in order):
@@ -14,6 +15,9 @@ Full processing pipeline (in order):
     5. Persist COMPLETED.
 
 Uses IfcOpenShell as the canonical IFC parser.
+IfcOpenShell is the source of truth for schema support:
+    missing / corrupt / invalid IFC → generic FAILED message
+    unsupported IFC schema (SchemaError) → specific FAILED message
 """
 from datetime import datetime, timezone
 from pathlib import Path
@@ -125,7 +129,8 @@ def process_ifc_model(
       1. Guard: reject if not PENDING (IfcInvalidProcessingStateError).
       2. Transition to PROCESSING and commit (IfcProcessingPersistenceError on failure).
       3. Resolve storage_path defensively (FAILED if invalid).
-      4. Open file with IfcOpenShell (FAILED if missing, corrupt, or not valid IFC).
+      4. Open file with IfcOpenShell (specific FAILED if unsupported schema;
+         generic FAILED if missing, corrupt, or not valid IFC).
       5. Extract spatial hierarchy (FAILED if IfcSpatialExtractionError).
       6. Extract elements (FAILED if IfcElementExtractionError).
       7. Extract properties/quantities (FAILED if IfcPropertyExtractionError).
@@ -176,6 +181,12 @@ def process_ifc_model(
     try:
         ifc_file = ifcopenshell.open(str(full_path))
         ifc_schema = ifc_file.schema
+    except ifcopenshell.SchemaError:
+        return _persist_failed(
+            db,
+            model,
+            "El esquema IFC del archivo no está soportado.",
+        )
     except Exception:
         return _persist_failed(db, model, "No se pudo procesar el archivo IFC.")
 
