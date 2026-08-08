@@ -1,6 +1,6 @@
 from pathlib import Path, PureWindowsPath
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -8,6 +8,14 @@ from app.api.dependencies.auth import get_current_user
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.user import User
+from app.schemas.ifc_analytics import (
+    IfcAnalyticsElementItem,
+    IfcAnalyticsElementPage,
+    IfcAnalyticsElementStorey,
+    IfcAnalyticsStoreyCount,
+    IfcAnalyticsTypeCount,
+    IfcModelAnalyticsResponse,
+)
 from app.schemas.ifc_element import (
     IfcElementDetailResponse,
     IfcElementPropertyResponse,
@@ -15,6 +23,11 @@ from app.schemas.ifc_element import (
 )
 from app.schemas.ifc_model import IfcModelResponse
 from app.services.ifc_background import process_ifc_model_background
+from app.services.ifc_analytics import (
+    IfcAnalyticsQueryError,
+    get_ifc_elements_page,
+    get_ifc_model_analytics,
+)
 from app.services.ifc_element_queries import (
     IfcElementQueryError,
     get_ifc_element_detail,
@@ -274,6 +287,167 @@ def download_ifc_file(
         path=candidate,
         media_type="application/octet-stream",
         filename=model.original_filename,
+    )
+
+
+@router.get(
+    "/{model_id}/analytics",
+    response_model=IfcModelAnalyticsResponse,
+    status_code=status.HTTP_200_OK,
+)
+def get_model_analytics(
+    model_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> IfcModelAnalyticsResponse:
+    """
+    Return aggregated BIM analytics for a COMPLETED model owned by the authenticated user.
+
+    Security guarantees:
+    - Requires valid Bearer JWT.
+    - IDOR-protected: model_id + owner_id evaluated together in SQL.
+    - Only COMPLETED models have analytics available.
+    - Never reopens the IFC file; all data comes exclusively from PostgreSQL.
+    - Read-only: no DB writes, commits, flushes, or rollbacks.
+    """
+    # 1. Authorize model — IDOR guard
+    try:
+        model = get_ifc_model_for_owner(db, model_id, current_user.id)
+    except IfcModelQueryError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error interno al consultar el modelo.",
+        )
+    if model is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Modelo IFC no encontrado.",
+        )
+
+    # 2. Status guard — analytics only available for COMPLETED models
+    if model.status != "COMPLETED":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="La información analítica del modelo no está disponible.",
+        )
+
+    # 3. Query analytics
+    try:
+        data = get_ifc_model_analytics(
+            db,
+            model_id,
+            total_elements=model.element_count,
+            total_spatial_nodes=model.spatial_node_count,
+            total_properties=model.property_count,
+        )
+    except IfcAnalyticsQueryError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error interno al consultar la información analítica.",
+        )
+
+    return IfcModelAnalyticsResponse(
+        total_elements=data.total_elements,
+        total_spatial_nodes=data.total_spatial_nodes,
+        total_properties=data.total_properties,
+        by_ifc_type=[
+            IfcAnalyticsTypeCount(ifc_type=r.ifc_type, count=r.count)
+            for r in data.by_ifc_type
+        ],
+        by_storey=[
+            IfcAnalyticsStoreyCount(
+                global_id=r.global_id,
+                name=r.name,
+                elevation=r.elevation,
+                count=r.count,
+            )
+            for r in data.by_storey
+        ],
+        without_storey_count=data.without_storey_count,
+    )
+
+
+@router.get(
+    "/{model_id}/elements",
+    response_model=IfcAnalyticsElementPage,
+    status_code=status.HTTP_200_OK,
+)
+def list_model_elements(
+    model_id: int,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> IfcAnalyticsElementPage:
+    """
+    Return a paginated list of BIM elements for a COMPLETED model owned by the
+    authenticated user.
+
+    Security guarantees:
+    - Requires valid Bearer JWT.
+    - IDOR-protected: model_id + owner_id evaluated together in SQL.
+    - Only COMPLETED models have element data available.
+    - Never reopens the IFC file; all data comes exclusively from PostgreSQL.
+    - Pagination applied in SQL — does not load full table into Python.
+    - Read-only: no DB writes, commits, flushes, or rollbacks.
+    """
+    # 1. Authorize model — IDOR guard
+    try:
+        model = get_ifc_model_for_owner(db, model_id, current_user.id)
+    except IfcModelQueryError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error interno al consultar el modelo.",
+        )
+    if model is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Modelo IFC no encontrado.",
+        )
+
+    # 2. Status guard
+    if model.status != "COMPLETED":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="La información analítica del modelo no está disponible.",
+        )
+
+    # 3. Query elements page
+    try:
+        page = get_ifc_elements_page(db, model_id, limit=limit, offset=offset)
+    except IfcAnalyticsQueryError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error interno al consultar la información analítica.",
+        )
+
+    return IfcAnalyticsElementPage(
+        total=page.total,
+        limit=page.limit,
+        offset=page.offset,
+        items=[
+            IfcAnalyticsElementItem(
+                ifc_entity_id=item.ifc_entity_id,
+                global_id=item.global_id,
+                ifc_type=item.ifc_type,
+                name=item.name,
+                object_type=item.object_type,
+                tag=item.tag,
+                predefined_type=item.predefined_type,
+                type_ifc_type=item.type_ifc_type,
+                type_name=item.type_name,
+                storey=(
+                    IfcAnalyticsElementStorey(
+                        global_id=item.storey.global_id,
+                        name=item.storey.name,
+                        elevation=item.storey.elevation,
+                    )
+                    if item.storey is not None
+                    else None
+                ),
+            )
+            for item in page.items
+        ],
     )
 
 
