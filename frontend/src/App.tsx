@@ -4,6 +4,7 @@ import { registerUser, loginUser, getCurrentUser, ApiError } from "./api/auth"
 import type { User } from "./api/auth"
 import { listModels, getModel, uploadModel } from "./api/models"
 import IfcViewer from "./components/IfcViewer"
+import IfcAnalyticsPanel from "./components/IfcAnalyticsPanel"
 import type { IfcModel, IfcModelStatus } from "./api/models"
 
 type ActiveForm = "login" | "register"
@@ -369,12 +370,19 @@ function App() {
                   </p>
                 )}
               {selectedModel.status === "COMPLETED" && (
-                <IfcViewer
-                  key={selectedModel.id}
-                  accessToken={accessToken}
-                  modelId={selectedModel.id}
-                  modelName={selectedModel.original_filename}
-                />
+                <>
+                  <IfcAnalyticsPanel
+                    key={`analytics-${selectedModel.id}`}
+                    accessToken={accessToken}
+                    modelId={selectedModel.id}
+                  />
+                  <IfcViewer
+                    key={selectedModel.id}
+                    accessToken={accessToken}
+                    modelId={selectedModel.id}
+                    modelName={selectedModel.original_filename}
+                  />
+                </>
               )}
             </section>
           )}
