@@ -1048,3 +1048,109 @@ def test_failed_commit_failure_via_extraction_raises(tmp_path):
             process_ifc_model(db, model, settings)
 
     db.rollback.assert_called()
+
+
+# ===========================================================================
+# 27. Unsupported schema (SchemaError) → specific FAILED
+# ===========================================================================
+
+_OPEN_PATH = "app.services.ifc_processing.ifcopenshell.open"
+
+_SCHEMA_ERROR = ifcopenshell.SchemaError("Unsupported schema: IFC5")
+
+
+def _schema_error_patch():
+    """Context manager: ifcopenshell.open raises SchemaError."""
+    return patch(_OPEN_PATH, side_effect=_SCHEMA_ERROR)
+
+
+def test_schema_error_status_failed(tmp_path):
+    """SchemaError → status is FAILED."""
+    settings = _make_settings(tmp_path)
+    model = _make_model()
+    db = _make_db()
+
+    with _schema_error_patch():
+        result = process_ifc_model(db, model, settings)
+
+    assert result.status == "FAILED"
+
+
+def test_schema_error_ifc_schema_none(tmp_path):
+    """SchemaError → ifc_schema remains None."""
+    settings = _make_settings(tmp_path)
+    model = _make_model()
+    db = _make_db()
+
+    with _schema_error_patch():
+        result = process_ifc_model(db, model, settings)
+
+    assert result.ifc_schema is None
+
+
+def test_schema_error_message_exact(tmp_path):
+    """SchemaError → error_message is exactly the expected safe string."""
+    settings = _make_settings(tmp_path)
+    model = _make_model()
+    db = _make_db()
+
+    with _schema_error_patch():
+        result = process_ifc_model(db, model, settings)
+
+    assert result.error_message == "El esquema IFC del archivo no está soportado."
+
+
+def test_schema_error_message_no_internal_detail(tmp_path):
+    """SchemaError → public message does not leak schema name, exception text, or paths."""
+    settings = _make_settings(tmp_path)
+    model = _make_model()
+    db = _make_db()
+
+    with _schema_error_patch():
+        result = process_ifc_model(db, model, settings)
+
+    msg = result.error_message or ""
+    assert "IFC5" not in msg
+    assert "Unsupported schema" not in msg
+    assert str(tmp_path) not in msg
+
+
+def test_schema_error_no_extractors_called(tmp_path):
+    """SchemaError → spatial, elements, and properties extractors are never called."""
+    settings = _make_settings(tmp_path)
+    model = _make_model()
+    db = _make_db()
+
+    with (
+        _schema_error_patch(),
+        patch(_SPATIAL_PATH) as mock_spatial,
+        patch(_ELEMENTS_PATH) as mock_elements,
+        patch(_PROPS_PATH) as mock_props,
+    ):
+        process_ifc_model(db, model, settings)
+
+    mock_spatial.assert_not_called()
+    mock_elements.assert_not_called()
+    mock_props.assert_not_called()
+
+
+def test_schema_error_distinct_from_corrupt(tmp_path):
+    """SchemaError produces a different message than a corrupt/invalid file."""
+    # Corrupt file → generic message
+    ifc_path = tmp_path / "model.ifc"
+    ifc_path.write_bytes(b"garbage data")
+
+    settings = _make_settings(tmp_path)
+    model_corrupt = _make_model(storage_path=ifc_path.name)
+    db_corrupt = _make_db()
+    result_corrupt = process_ifc_model(db_corrupt, model_corrupt, settings)
+
+    # SchemaError → specific message
+    model_schema = _make_model()
+    db_schema = _make_db()
+    with _schema_error_patch():
+        result_schema = process_ifc_model(db_schema, model_schema, settings)
+
+    assert result_corrupt.error_message == "No se pudo procesar el archivo IFC."
+    assert result_schema.error_message == "El esquema IFC del archivo no está soportado."
+    assert result_corrupt.error_message != result_schema.error_message

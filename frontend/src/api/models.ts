@@ -2,6 +2,57 @@ import { ApiError } from "./auth"
 
 const API_BASE_URL = "/api/v1"
 
+// ---------------------------------------------------------------------------
+// Analytics types
+// ---------------------------------------------------------------------------
+
+export interface IfcAnalyticsTypeCount {
+  ifc_type: string
+  count: number
+}
+
+export interface IfcAnalyticsStoreyCount {
+  global_id: string
+  name: string | null
+  elevation: number | null
+  count: number
+}
+
+export interface IfcModelAnalytics {
+  total_elements: number
+  total_spatial_nodes: number
+  total_properties: number
+  by_ifc_type: IfcAnalyticsTypeCount[]
+  by_storey: IfcAnalyticsStoreyCount[]
+  without_storey_count: number
+}
+
+export interface IfcAnalyticsElementStorey {
+  global_id: string
+  name: string | null
+  elevation: number | null
+}
+
+export interface IfcAnalyticsElementItem {
+  ifc_entity_id: number
+  global_id: string
+  ifc_type: string
+  name: string | null
+  object_type: string | null
+  tag: string | null
+  predefined_type: string | null
+  type_ifc_type: string | null
+  type_name: string | null
+  storey: IfcAnalyticsElementStorey | null
+}
+
+export interface IfcAnalyticsElementPage {
+  total: number
+  limit: number
+  offset: number
+  items: IfcAnalyticsElementItem[]
+}
+
 export type IfcModelStatus = "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED"
 
 export interface IfcModel {
@@ -116,6 +167,41 @@ export interface IfcElementDetail {
   direct_spatial: IfcSpatialNodeSummary | null
   resolved_storey: IfcSpatialNodeSummary | null
   properties: IfcElementProperty[]
+}
+
+export async function getModelAnalytics(
+  token: string,
+  modelId: number,
+  signal?: AbortSignal,
+): Promise<IfcModelAnalytics> {
+  const response = await fetch(`${API_BASE_URL}/models/${modelId}/analytics`, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal,
+  })
+  if (!response.ok) throw await parseErrorResponse(response)
+  return response.json() as Promise<IfcModelAnalytics>
+}
+
+export async function getModelElements(
+  token: string,
+  modelId: number,
+  limit: number,
+  offset: number,
+  signal?: AbortSignal,
+): Promise<IfcAnalyticsElementPage> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  })
+  const response = await fetch(
+    `${API_BASE_URL}/models/${modelId}/elements?${params.toString()}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      signal,
+    },
+  )
+  if (!response.ok) throw await parseErrorResponse(response)
+  return response.json() as Promise<IfcAnalyticsElementPage>
 }
 
 export async function getElementDetail(
